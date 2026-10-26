@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Rider Live Camera</title>
+<style>
+:root{color-scheme:dark}*{box-sizing:border-box}body{margin:0;background:#07112f;color:#fff;font:16px Arial,sans-serif;min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:14px;gap:12px}
+h1{font-size:20px;margin:4px 0}p{margin:0;color:#cbd5e1;text-align:center;line-height:1.4}#stage{position:relative;width:min(100%,520px);aspect-ratio:3/4;background:#000;border-radius:18px;overflow:hidden;border:1px solid #334155}video{width:100%;height:100%;object-fit:cover}#guide{position:absolute;left:5%;width:90%;top:34%;height:26%;border:3px solid #22c55e;border-radius:12px;box-shadow:0 0 0 999px #0006;pointer-events:none}#status{min-height:24px;text-align:center;color:#bae6fd;font-weight:700}button{width:min(100%,520px);padding:15px;border:0;border-radius:12px;font-size:17px;font-weight:800;color:#fff;background:#16a34a}button.secondary{background:#334155}button:disabled{opacity:.55}small{color:#94a3b8;text-align:center}
+</style>
+</head>
+<body>
+<h1>🚦 Rider Live Camera</h1>
+<p>Plate ko green box ke andar rakhein. Camera access isi alag HTTPS tab mein chalega.</p>
+<div id="stage"><video id="video" autoplay muted playsinline></video><div id="guide"></div></div>
+<div id="status">Start Camera dabayein.</div>
+<button id="start">📷 START LIVE CAMERA</button>
+<button id="stop" class="secondary">Camera Band Karein</button>
+<small>Is page ko Apps Script se bahar HTTPS hosting par rakhein.</small>
+<script>
+const video=document.getElementById('video'),statusEl=document.getElementById('status'),startBtn=document.getElementById('start');
+let stream=null,timer=null,waiting=false,requestId=0,stopped=false;
+function status(t){statusEl.textContent=t||''}
+function stopCamera(){stopped=true;if(timer){clearInterval(timer);timer=null}if(stream){stream.getTracks().forEach(t=>t.stop());stream=null}video.srcObject=null;waiting=false;startBtn.disabled=false;status('Camera band hai. Zaroorat ho to dobara Start dabayein.')}
+async function startCamera(){
+ if(stream)return;
+ if(!window.opener){status('Scanner ka main tab nahi mila. Is page ko Rider Scanner ke button se kholein.');return}
+ if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){status('Is browser mein live camera API available nahi hai. HTTPS Chrome use karein.');return}
+ startBtn.disabled=true;stopped=false;status('Camera permission maang raha hai...');
+ try{
+   try{stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{exact:'environment'},width:{ideal:1280},height:{ideal:720}},audio:false})}
+   catch(e){stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1280},height:{ideal:720}},audio:false})}
+   video.srcObject=stream;await video.play();status('🔍 Plate ko green box mein rakhein...');
+   timer=setInterval(sendFrame,2200);
+ }catch(e){stream=null;startBtn.disabled=false;status('Camera start nahi hua: '+(e.name||'Error')+'. Chrome site settings mein Camera Allow karein.')}
+}
+function sendFrame(){
+ if(stopped||waiting||!stream||video.readyState<2||!video.videoWidth)return;
+ const vw=video.videoWidth,vh=video.videoHeight;
+ const stage=document.getElementById('stage');
+ const visibleW=Math.min(vw,Math.round(vh*stage.clientWidth/stage.clientHeight));
+ const sx=Math.round((vw-visibleW)/2+visibleW*.05),sy=Math.round(vh*.34),sw=Math.round(visibleW*.90),sh=Math.round(vh*.26);
+ const scale=Math.min(1,1000/Math.max(sw,sh));const c=document.createElement('canvas');
+ c.width=Math.max(1,Math.round(sw*scale));c.height=Math.max(1,Math.round(sh*scale));
+ c.getContext('2d').drawImage(video,sx,sy,sw,sh,0,0,c.width,c.height);
+ const b64=c.toDataURL('image/jpeg',.82).split(',')[1];
+ waiting=true;requestId++;status('⏳ Plate check ho rahi hai...');
+ try{window.opener.postMessage({type:'RIDER_FRAME',requestId:requestId,b64:b64},'*')}
+ catch(e){waiting=false;status('Scanner tab se connection nahi hua.')}
+}
+window.addEventListener('message',e=>{
+ if(e.source!==window.opener)return;
+ const d=e.data||{};
+ if(d.type==='RIDER_STOP'){stopCamera();status('Rider mil gaya. Main Rider Scanner tab par wapas jaayein.');return}
+ if(d.type==='RIDER_SCAN_RESULT'){
+   waiting=false;const r=d.result||{};
+   if(r.info){stopCamera();status('✅ Rider mil gaya. Main tab par details dikh rahi hain.');return}
+   const err=String(r.error||'Plate abhi match nahi hui.');
+   if(/PIN|GEMINI_KEY|Script Google Sheet|Vehicle number ka column|Info naam ki sheet|tab nahi mila/i.test(err)){status('⚠️ '+err);return}
+   status(/Gemini ne padha/.test(err)?'Plate read: '+err.replace(/^Gemini ne padha:\s*/,'').slice(0,90):'🔍 Plate ko seedha aur saaf rakhein. Dobara scan ho raha hai...');
+ }
+});
+startBtn.addEventListener('click',startCamera);
+document.getElementById('stop').addEventListener('click',stopCamera);
+window.addEventListener('pagehide',stopCamera);
+</script>
+</body>
+</html>
